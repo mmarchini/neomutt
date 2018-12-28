@@ -83,13 +83,15 @@ static int edit_or_view_one_message(bool edit, struct Mailbox *m, struct Email *
   omagic = MboxType;
   MboxType = MUTT_MBOX;
 
-  struct Context *tmpctx = mx_mbox_open(NULL, tmp, MUTT_NEWFOLDER);
+  struct Mailbox *m_tmp = mx_path_resolve(tmp);
+  struct Context *tmpctx = mx_mbox_open(m_tmp, NULL, MUTT_NEWFOLDER);
 
   MboxType = omagic;
 
   if (!tmpctx)
   {
     mutt_error(_("could not create temporary folder: %s"), strerror(errno));
+    mailbox_free(&m_tmp);
     return -1;
   }
 
