@@ -84,7 +84,7 @@ static int edit_or_view_one_message(bool edit, struct Mailbox *m, struct Email *
   MboxType = MUTT_MBOX;
 
   struct Mailbox *m_tmp = mx_path_resolve(tmp);
-  struct Context *tmpctx = mx_mbox_open(m_tmp, NULL, MUTT_NEWFOLDER);
+  struct Context *tmpctx = mx_mbox_open(m_tmp, MUTT_NEWFOLDER);
 
   MboxType = omagic;
 
@@ -187,7 +187,7 @@ static int edit_or_view_one_message(bool edit, struct Mailbox *m, struct Email *
     goto bail;
   }
 
-  tmpctx = mx_mbox_open(m, NULL, MUTT_APPEND);
+  tmpctx = mx_mbox_open(m, MUTT_APPEND);
   if (!tmpctx)
   {
     rc = -1;
