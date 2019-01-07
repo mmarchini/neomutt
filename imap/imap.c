@@ -339,12 +339,12 @@ static int sync_helper(struct Mailbox *m, int right, int flag, const char *name)
  *
  * Count the number of patterns that can be done by the server (are full-text).
  */
-static int do_search(const struct Pattern *search, int allpats)
+static int do_search(const struct PatternHead *search, int allpats)
 {
   int rc = 0;
   const struct Pattern *pat = NULL;
 
-  for (pat = search; pat; pat = pat->next)
+  SLIST_FOREACH(pat, search, entries)
   {
     switch (pat->op)
     {
@@ -381,40 +381,45 @@ static int do_search(const struct Pattern *search, int allpats)
  * that require full-text search (neomutt already has what it needs for most
  * match types, and does a better job (eg server doesn't support regexes).
  */
-static int compile_search(struct Mailbox *m, const struct Pattern *pat, struct Buffer *buf)
+static int compile_search(struct Mailbox *m, const struct PatternHead *pat, struct Buffer *buf)
 {
+  struct Pattern *firstpat;
+
+  firstpat = SLIST_FIRST(pat);
+
   if (do_search(pat, 0) == 0)
     return 0;
 
-  if (pat->not)
+  if (firstpat->not)
     mutt_buffer_addstr(buf, "NOT ");
 
-  if (pat->child)
+  if (firstpat->child)
   {
     int clauses;
 
-    clauses = do_search(pat->child, 1);
+    clauses = do_search(firstpat->child, 1);
     if (clauses > 0)
     {
-      const struct Pattern *clause = pat->child;
+      struct PatternHead clause = *firstpat->child;
 
       mutt_buffer_addch(buf, '(');
 
       while (clauses)
       {
-        if (do_search(clause, 0))
+        if (do_search(&clause, 0))
         {
-          if (pat->op == MUTT_OR && clauses > 1)
+          if (firstpat->op == MUTT_OR && clauses > 1)
             mutt_buffer_addstr(buf, "OR ");
           clauses--;
 
-          if (compile_search(m, clause, buf) < 0)
+          if (compile_search(m, &clause, buf) < 0)
             return -1;
 
           if (clauses)
             mutt_buffer_addch(buf, ' ');
         }
-        clause = clause->next;
+
+        SLIST_REMOVE_HEAD(&clause, entries);
       }
 
       mutt_buffer_addch(buf, ')');
@@ -425,20 +430,20 @@ static int compile_search(struct Mailbox *m, const struct Pattern *pat, struct B
     char term[STRING];
     char *delim = NULL;
 
-    switch (pat->op)
+    switch (firstpat->op)
     {
       case MUTT_HEADER:
         mutt_buffer_addstr(buf, "HEADER ");
 
         /* extract header name */
-        delim = strchr(pat->p.str, ':');
+        delim = strchr(firstpat->p.str, ':');
         if (!delim)
         {
-          mutt_error(_("Header search without header name: %s"), pat->p.str);
+          mutt_error(_("Header search without header name: %s"), firstpat->p.str);
           return -1;
         }
         *delim = '\0';
-        imap_quote_string(term, sizeof(term), pat->p.str, false);
+        imap_quote_string(term, sizeof(term), firstpat->p.str, false);
         mutt_buffer_addstr(buf, term);
         mutt_buffer_addch(buf, ' ');
 
@@ -451,12 +456,12 @@ static int compile_search(struct Mailbox *m, const struct Pattern *pat, struct B
         break;
       case MUTT_BODY:
         mutt_buffer_addstr(buf, "BODY ");
-        imap_quote_string(term, sizeof(term), pat->p.str, false);
+        imap_quote_string(term, sizeof(term), firstpat->p.str, false);
         mutt_buffer_addstr(buf, term);
         break;
       case MUTT_WHOLE_MSG:
         mutt_buffer_addstr(buf, "TEXT ");
-        imap_quote_string(term, sizeof(term), pat->p.str, false);
+        imap_quote_string(term, sizeof(term), firstpat->p.str, false);
         mutt_buffer_addstr(buf, term);
         break;
       case MUTT_SERVERSEARCH:
@@ -464,12 +469,12 @@ static int compile_search(struct Mailbox *m, const struct Pattern *pat, struct B
         struct ImapAccountData *adata = imap_adata_get(m);
         if (!mutt_bit_isset(adata->capabilities, IMAP_CAP_X_GM_EXT1))
         {
-          mutt_error(_("Server-side custom search not supported: %s"), pat->p.str);
+          mutt_error(_("Server-side custom search not supported: %s"), firstpat->p.str);
           return -1;
         }
       }
         mutt_buffer_addstr(buf, "X-GM-RAW ");
-        imap_quote_string(term, sizeof(term), pat->p.str, false);
+        imap_quote_string(term, sizeof(term), firstpat->p.str, false);
         mutt_buffer_addstr(buf, term);
         break;
     }
@@ -1350,7 +1355,7 @@ int imap_mailbox_status(struct Mailbox *m, bool queue)
  * @retval  0 Success
  * @retval -1 Failure
  */
-int imap_search(struct Mailbox *m, const struct Pattern *pat)
+int imap_search(struct Mailbox *m, const struct PatternHead *pat)
 {
   struct Buffer buf;
   struct ImapAccountData *adata = imap_adata_get(m);

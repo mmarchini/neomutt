@@ -45,6 +45,7 @@
 #include "mutt_menu.h"
 #include "options.h"
 #include "pattern.h"
+#include "mutt/queue.h"
 
 /* globals */
 int *ColorQuote = NULL;
