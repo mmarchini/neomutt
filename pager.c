@@ -3422,8 +3422,14 @@ int mutt_pager(const char *banner, const char *fname, int flags, struct Pager *e
         break;
 
       case OP_EDIT_LABEL:
+      {
         CHECK_MODE(IsEmail(extra));
-        rc = mutt_label_message(extra->email);
+
+        struct EmailList el = STAILQ_HEAD_INITIALIZER(el);
+        el_add_email(&el, extra->email);
+        rc = mutt_label_message(Context->mailbox, &el);
+        el_free(&el);
+
         if (rc > 0)
         {
           Context->mailbox->changed = true;
@@ -3435,6 +3441,7 @@ int mutt_pager(const char *banner, const char *fname, int flags, struct Pager *e
           mutt_message(_("No labels changed"));
         }
         break;
+      }
 
       case OP_FORGET_PASSPHRASE:
         crypt_forget_passphrase();
