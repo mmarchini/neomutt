@@ -2398,8 +2398,10 @@ int mutt_index_menu(void)
         else
         {
           struct Email *oldcur = CUR_EMAIL;
+          struct EmailList el = STAILQ_HEAD_INITIALIZER(el);
+          el_add_tagged(&el, Context, Context->last_tag, tag);
 
-          if (mutt_link_threads(CUR_EMAIL, tag ? NULL : Context->last_tag, Context))
+          if (mutt_link_threads(CUR_EMAIL, &el, Context->mailbox))
           {
             mutt_sort_headers(Context, true);
             menu->current = oldcur->virtual;
@@ -2409,6 +2411,8 @@ int mutt_index_menu(void)
           }
           else
             mutt_error(_("No thread linked"));
+
+          el_free(&el);
         }
 
         if (menu->menu == MENU_PAGER)
