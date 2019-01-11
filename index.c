@@ -1793,12 +1793,17 @@ int mutt_index_menu(void)
         break;
 
       case OP_COMPOSE_TO_SENDER:
+      {
         CHECK_ATTACH;
         CHECK_MSGCOUNT;
         CHECK_VISIBLE;
-        ci_send_message(SEND_TO_SENDER, NULL, NULL, Context, tag ? NULL : CUR_EMAIL);
+        struct EmailList el = STAILQ_HEAD_INITIALIZER(el);
+        el_add_tagged(&el, Context, CUR_EMAIL, tag);
+        ci_send_message(SEND_TO_SENDER, NULL, NULL, Context, &el);
+        el_free(&el);
         menu->redraw = REDRAW_FULL;
         break;
+      }
 
         /* --------------------------------------------------------------------
          * The following operations can be performed inside of the pager.
@@ -3103,41 +3108,42 @@ int mutt_index_menu(void)
       }
 
       case OP_FORWARD_MESSAGE:
-
+      {
         CHECK_MSGCOUNT;
         CHECK_VISIBLE;
         CHECK_ATTACH;
+        struct EmailList el = STAILQ_HEAD_INITIALIZER(el);
+        el_add_tagged(&el, Context, CUR_EMAIL, tag);
         if (PgpAutoDecode && (tag || !(CUR_EMAIL->security & PGP_TRADITIONAL_CHECKED)))
         {
-          struct EmailList el = STAILQ_HEAD_INITIALIZER(el);
-          el_add_tagged(&el, Context, CUR_EMAIL, tag);
           mutt_check_traditional_pgp(&el, &menu->redraw);
-          el_free(&el);
         }
-        ci_send_message(SEND_FORWARD, NULL, NULL, Context, tag ? NULL : CUR_EMAIL);
+        ci_send_message(SEND_FORWARD, NULL, NULL, Context, &el);
+        el_free(&el);
         menu->redraw = REDRAW_FULL;
         break;
+      }
 
       case OP_FORGET_PASSPHRASE:
         crypt_forget_passphrase();
         break;
 
       case OP_GROUP_REPLY:
-
+      {
         CHECK_MSGCOUNT;
         CHECK_VISIBLE;
         CHECK_ATTACH;
+        struct EmailList el = STAILQ_HEAD_INITIALIZER(el);
+        el_add_tagged(&el, Context, CUR_EMAIL, tag);
         if (PgpAutoDecode && (tag || !(CUR_EMAIL->security & PGP_TRADITIONAL_CHECKED)))
         {
-          struct EmailList el = STAILQ_HEAD_INITIALIZER(el);
-          el_add_tagged(&el, Context, CUR_EMAIL, tag);
           mutt_check_traditional_pgp(&el, &menu->redraw);
-          el_free(&el);
         }
-        ci_send_message(SEND_REPLY | SEND_GROUP_REPLY, NULL, NULL, Context,
-                        tag ? NULL : CUR_EMAIL);
+        ci_send_message(SEND_REPLY | SEND_GROUP_REPLY, NULL, NULL, Context, &el);
+        el_free(&el);
         menu->redraw = REDRAW_FULL;
         break;
+      }
 
       case OP_EDIT_LABEL:
       {
@@ -3169,21 +3175,21 @@ int mutt_index_menu(void)
       }
 
       case OP_LIST_REPLY:
-
+      {
         CHECK_ATTACH;
         CHECK_MSGCOUNT;
         CHECK_VISIBLE;
+        struct EmailList el = STAILQ_HEAD_INITIALIZER(el);
+        el_add_tagged(&el, Context, CUR_EMAIL, tag);
         if (PgpAutoDecode && (tag || !(CUR_EMAIL->security & PGP_TRADITIONAL_CHECKED)))
         {
-          struct EmailList el = STAILQ_HEAD_INITIALIZER(el);
-          el_add_tagged(&el, Context, CUR_EMAIL, tag);
           mutt_check_traditional_pgp(&el, &menu->redraw);
-          el_free(&el);
         }
-        ci_send_message(SEND_REPLY | SEND_LIST_REPLY, NULL, NULL, Context,
-                        tag ? NULL : CUR_EMAIL);
+        ci_send_message(SEND_REPLY | SEND_LIST_REPLY, NULL, NULL, Context, &el);
+        el_free(&el);
         menu->redraw = REDRAW_FULL;
         break;
+      }
 
       case OP_MAIL:
 
@@ -3215,6 +3221,7 @@ int mutt_index_menu(void)
       }
 
       case OP_CHECK_TRADITIONAL:
+      {
         if (!(WithCrypto & APPLICATION_PGP))
           break;
         CHECK_MSGCOUNT;
@@ -3233,6 +3240,7 @@ int mutt_index_menu(void)
           continue;
         }
         break;
+      }
 
       case OP_PIPE:
 
@@ -3396,8 +3404,11 @@ int mutt_index_menu(void)
           else
           {
             CHECK_MSGCOUNT;
+            struct EmailList el = STAILQ_HEAD_INITIALIZER(el);
+            el_add_tagged(&el, Context, CUR_EMAIL, tag);
             ci_send_message((op == OP_FOLLOWUP ? SEND_REPLY : SEND_FORWARD) | SEND_NEWS,
-                            NULL, NULL, Context, tag ? NULL : CUR_EMAIL);
+                            NULL, NULL, Context, &el);
+            el_free(&el);
           }
           menu->redraw = REDRAW_FULL;
           break;
@@ -3405,20 +3416,21 @@ int mutt_index_menu(void)
 #endif
       /* fallthrough */
       case OP_REPLY:
-
+      {
         CHECK_ATTACH;
         CHECK_MSGCOUNT;
         CHECK_VISIBLE;
+        struct EmailList el = STAILQ_HEAD_INITIALIZER(el);
+        el_add_tagged(&el, Context, CUR_EMAIL, tag);
         if (PgpAutoDecode && (tag || !(CUR_EMAIL->security & PGP_TRADITIONAL_CHECKED)))
         {
-          struct EmailList el = STAILQ_HEAD_INITIALIZER(el);
-          el_add_tagged(&el, Context, CUR_EMAIL, tag);
           mutt_check_traditional_pgp(&el, &menu->redraw);
-          el_free(&el);
         }
-        ci_send_message(SEND_REPLY, NULL, NULL, Context, tag ? NULL : CUR_EMAIL);
+        ci_send_message(SEND_REPLY, NULL, NULL, Context, &el);
+        el_free(&el);
         menu->redraw = REDRAW_FULL;
         break;
+      }
 
       case OP_SHELL_ESCAPE:
 
