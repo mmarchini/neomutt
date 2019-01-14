@@ -114,5 +114,6 @@ char *      mutt_str_substr_cpy(char *dest, const char *begin, const char *end, 
 char *      mutt_str_substr_dup(const char *begin, const char *end);
 const char *mutt_str_sysexit(int e);
 int         mutt_str_word_casecmp(const char *a, const char *b);
+struct ListHead mutt_str_split(const char *src, int sep);
 
 #endif /* MUTT_LIB_STRING_H */
