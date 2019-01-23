@@ -29,7 +29,9 @@
 #include "mutt.h"
 #include "icommands.h"
 #include "globals.h"
+#include "keymap.h"
 #include "muttlib.h"
+#include "opcodes.h"
 #include "pager.h"
 #include "summary.h"
 #include "version.h"
@@ -55,7 +57,7 @@ const struct ICommand ICommandList[] = {
   { "bind",     icmd_bind,     0 },
   { "color",    icmd_color,    0 },
   { "help",     icmd_help,     0 },
-  { "macro",    icmd_bind,     0 },
+  { "macro",    icmd_bind,     1 },
   { "messages", icmd_messages, 0 },
   { "q!",       icmd_quit,     0 },
   { "q",        icmd_quit,     0 },
@@ -147,12 +149,131 @@ static enum CommandResult icmd_test(struct Buffer *buf, struct Buffer *s,
   return MUTT_CMD_SUCCESS;
 }
 
+/**
+ * icmd_bind - Parse 'bind' and 'macro' commands - Implements ::icommand_t
+ */
 static enum CommandResult icmd_bind(struct Buffer *buf, struct Buffer *s,
                                     unsigned long data, struct Buffer *err)
 {
-  /* TODO: implement ':bind' and ':macro' command as suggested by flatcap in #162 */
-  mutt_buffer_addstr(err, _("Not implemented yet."));
-  return MUTT_CMD_ERROR;
+  FILE *fpout = NULL;
+  bool valid_menu = false;
+  char tempfile[PATH_MAX];
+  struct Keymap *map = NULL, *next = NULL;
+
+  if (!MoreArgs(s))
+    mutt_buffer_strcpy(buf, "all");
+  else
+    mutt_extract_token(buf, s, 0);
+
+  if (MoreArgs(s))
+    /* More arguments potentially means the user is using the 
+     * ::command_t :bind command thus we delegate the task. */
+    return MUTT_CMD_ERROR;
+
+  mutt_mktemp(tempfile, sizeof(tempfile));
+  fpout = mutt_file_fopen(tempfile, "w");
+  if (!fpout)
+  {
+    mutt_buffer_printf(err, _("Could not create temporary file %s"), tempfile);
+    return MUTT_CMD_ERROR;
+  }
+
+  for (int i = 0; i < MENU_MAX; i++)
+  {
+    const char *menu_name = mutt_map_get_name(i, Menus);
+
+    if (mutt_str_strcasecmp(buf->data, "all") == 0 ||
+        mutt_str_strcasecmp(buf->data, menu_name) == 0)
+    {
+      valid_menu = true;
+
+      fflush(fpout);
+      const long init_size = mutt_file_get_size(tempfile);
+
+      for (map = Keymaps[i]; map; map = next)
+      {
+        char binding[MAX_SEQ];
+        next = map->next;
+        km_expand_key(binding, MAX_SEQ, map);
+
+        if (data == 1 && map->op == OP_MACRO)
+        {
+          // :macro command
+          struct Buffer tmp;
+          mutt_buffer_init(&tmp);
+          escape_string(&tmp, map->macro);
+          
+          if (map->desc)
+            fprintf(fpout, "macro %s %s \"%s\" \"%s\"\n", menu_name, binding,
+                    tmp.data, map->desc);
+          else
+            fprintf(fpout, "macro %s %s \"%s\"\n", menu_name, binding, tmp.data);
+        }
+        else if (data == 0 && map->op != OP_MACRO)
+        {
+          // :bind command
+          const char *fn_name = NULL;
+
+          if (map->op == OP_NULL)
+          {
+            fprintf(fpout, "bind %s %s noop\n", menu_name, binding);
+            continue;
+          }
+
+          /* The pager and editor menus don't use the generic map,
+           * however for other menus try generic first. */
+          if ((i != MENU_PAGER) && (i != MENU_EDITOR) && (i != MENU_GENERIC))
+          {
+            fn_name = mutt_get_func(OpGeneric, map->op);
+          }
+
+          if (!fn_name)
+          {
+            const struct Binding *bindings = km_get_table(i);
+            if (!bindings)
+              continue;
+
+            fn_name = mutt_get_func(bindings, map->op);
+          }
+
+          fprintf(fpout, "bind %s %s %s\n", menu_name, binding, fn_name);
+        }
+      }
+
+      fflush(fpout);
+
+      if (mutt_str_strcasecmp(buf->data, menu_name) == 0)
+          break;
+
+      if (init_size != mutt_file_get_size(tempfile) && i < MENU_MAX - 1)
+        fputs("\n", fpout);
+    }
+  }
+
+  if (!valid_menu)
+  {
+    mutt_buffer_printf(err, _("%s: no such menu"), buf->data);
+    mutt_file_fclose(&fpout);
+    return MUTT_CMD_ERROR;
+  }
+
+  mutt_file_fclose(&fpout);
+
+  if(mutt_file_check_empty(tempfile) == 1)
+  {
+    mutt_buffer_printf(err, _("%s: no %s for this menu"), buf->data,
+                       data == 0 ? "bindings" : "macros");
+    return MUTT_CMD_ERROR;
+  }
+
+  struct Pager info = { 0 };
+  if (mutt_pager("bind", tempfile, 0, &info) == -1)
+  {
+    mutt_buffer_printf(err, _("Could not create temporary file %s"), tempfile);
+    return MUTT_CMD_ERROR;
+  }
+
+  return MUTT_CMD_SUCCESS;
 }
 
 static enum CommandResult icmd_color(struct Buffer *buf, struct Buffer *s,
