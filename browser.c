@@ -398,7 +398,9 @@ static const char *folder_format_str(char *buf, size_t buflen, size_t col, int c
         if (!do_locales)
           setlocale(LC_TIME, "C");
         char date[SHORT_STRING];
-        strftime(date, sizeof(date), t_fmt, localtime(&folder->ff->mtime));
+        struct tm tm = { 0 };
+        localtime_r(&folder->ff->mtime, &tm);
+        strftime(date, sizeof(date), t_fmt, &tm);
         if (!do_locales)
           setlocale(LC_TIME, "");
 

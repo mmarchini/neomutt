@@ -1256,7 +1256,9 @@ static void print_time(time_t t, struct State *s)
 {
   char p[STRING];
 
-  strftime(p, sizeof(p), nl_langinfo(D_T_FMT), localtime(&t));
+  struct tm tm = { 0 };
+  localtime_r(&t, &tm);
+  strftime(p, sizeof(p), nl_langinfo(D_T_FMT), &tm);
   state_puts(p, s);
 }
 
@@ -2530,7 +2532,9 @@ static int pgp_gpgme_extract_keys(gpgme_data_t keydata, FILE **fp)
       if (len > 8)
         shortid += len - 8;
       tt = subkey->timestamp;
-      strftime(date, sizeof(date), "%Y-%m-%d", localtime(&tt));
+      struct tm tm = { 0 };
+      localtime_r(&tt, &tm);
+      strftime(date, sizeof(date), "%Y-%m-%d", &tm);
 
       if (!more)
       {
@@ -3439,7 +3443,7 @@ static const char *crypt_format_str(char *buf, size_t buflen, size_t col, int co
     {
       char buf2[SHORT_STRING];
       bool do_locales = true;
-      struct tm *tm = NULL;
+      struct tm tm = { 0 };
       size_t len;
 
       char *p = buf;
@@ -3481,12 +3485,12 @@ static const char *crypt_format_str(char *buf, size_t buflen, size_t col, int co
         if (key->kobj->subkeys && (key->kobj->subkeys->timestamp > 0))
           tt = key->kobj->subkeys->timestamp;
 
-        tm = localtime(&tt);
+        localtime_r(&tt, &tm);
       }
 
       if (!do_locales)
         setlocale(LC_TIME, "C");
-      strftime(buf2, sizeof(buf2), buf, tm);
+      strftime(buf2, sizeof(buf2), buf, &tm);
       if (!do_locales)
         setlocale(LC_TIME, "");
 
@@ -4068,7 +4072,6 @@ static void print_key_info(gpgme_key_t key, FILE *fp)
   int idx;
   const char *s = NULL, *s2 = NULL;
   time_t tt = 0;
-  struct tm *tm = NULL;
   char shortbuf[SHORT_STRING];
   unsigned long aval = 0;
   const char *delim = NULL;
@@ -4121,8 +4124,9 @@ static void print_key_info(gpgme_key_t key, FILE *fp)
   {
     tt = key->subkeys->timestamp;
 
-    tm = localtime(&tt);
-    strftime(shortbuf, sizeof(shortbuf), nl_langinfo(D_T_FMT), tm);
+    struct tm tm = { 0 };
+    localtime_r(&tt, &tm);
+    strftime(shortbuf, sizeof(shortbuf), nl_langinfo(D_T_FMT), &tm);
     fprintf(fp, "%*s%s\n", KeyInfoPadding[KIP_VALID_FROM],
             _(KeyInfoPrompts[KIP_VALID_FROM]), shortbuf);
   }
@@ -4131,8 +4135,9 @@ static void print_key_info(gpgme_key_t key, FILE *fp)
   {
     tt = key->subkeys->expires;
 
-    tm = localtime(&tt);
-    strftime(shortbuf, sizeof(shortbuf), nl_langinfo(D_T_FMT), tm);
+    struct tm tm = { 0 };
+    localtime_r(&tt, &tm);
+    strftime(shortbuf, sizeof(shortbuf), nl_langinfo(D_T_FMT), &tm);
     fprintf(fp, "%*s%s\n", KeyInfoPadding[KIP_VALID_TO],
             _(KeyInfoPrompts[KIP_VALID_TO]), shortbuf);
   }
@@ -4269,8 +4274,9 @@ static void print_key_info(gpgme_key_t key, FILE *fp)
       {
         tt = subkey->timestamp;
 
-        tm = localtime(&tt);
-        strftime(shortbuf, sizeof(shortbuf), nl_langinfo(D_T_FMT), tm);
+        struct tm tm = { 0 };
+        localtime_r(&tt, &tm);
+        strftime(shortbuf, sizeof(shortbuf), nl_langinfo(D_T_FMT), &tm);
         fprintf(fp, "%*s%s\n", KeyInfoPadding[KIP_VALID_FROM],
                 _(KeyInfoPrompts[KIP_VALID_FROM]), shortbuf);
       }
@@ -4279,8 +4285,9 @@ static void print_key_info(gpgme_key_t key, FILE *fp)
       {
         tt = subkey->expires;
 
-        tm = localtime(&tt);
-        strftime(shortbuf, sizeof(shortbuf), nl_langinfo(D_T_FMT), tm);
+        struct tm tm = { 0 };
+        localtime_r(&tt, &tm);
+        strftime(shortbuf, sizeof(shortbuf), nl_langinfo(D_T_FMT), &tm);
         fprintf(fp, "%*s%s\n", KeyInfoPadding[KIP_VALID_TO],
                 _(KeyInfoPrompts[KIP_VALID_TO]), shortbuf);
       }

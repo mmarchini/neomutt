@@ -262,7 +262,6 @@ static const char *pgp_entry_fmt(char *buf, size_t buflen, size_t col, int cols,
     {
       char buf2[SHORT_STRING];
       bool do_locales = true;
-      struct tm *tm = NULL;
       size_t len;
 
       char *p = buf;
@@ -298,11 +297,12 @@ static const char *pgp_entry_fmt(char *buf, size_t buflen, size_t col, int cols,
       }
       *p = 0;
 
-      tm = localtime(&key->gen_time);
+      struct tm tm = { 0 };
+      localtime_r(&key->gen_time, &tm);
 
       if (!do_locales)
         setlocale(LC_TIME, "C");
-      strftime(buf2, sizeof(buf2), buf, tm);
+      strftime(buf2, sizeof(buf2), buf, &tm);
       if (!do_locales)
         setlocale(LC_TIME, "");
 
