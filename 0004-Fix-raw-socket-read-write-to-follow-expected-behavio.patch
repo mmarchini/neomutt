@@ -1,0 +1,77 @@
+From 688e27a93b9c2ed377e097b921e3cb43f6dd1057 Mon Sep 17 00:00:00 2001
+From: Kevin McCarthy <kevin@8t8.us>
+Date: Mon, 21 Jan 2019 15:19:08 -0800
+Subject: [PATCH] Fix raw socket read/write to follow expected behavior.
+
+The mutt_sasl.c code expects conn_write() to write the entire buffer.
+This is inconsistent with mutt_socket.c, but since other conn_write()
+implementations guarantee this, change raw_socket_write() to do so too
+for now.
+
+Also, update reading and writing to loop on EINTR, as gnutls does.
+They won't return EAGAIN or EWOULDBLOCK because we don't mark sockets
+as non-blocking.
+---
+ mutt_socket.c | 32 +++++++++++++++++++++++++-------
+ 1 file changed, 25 insertions(+), 7 deletions(-)
+
+diff --git a/mutt_socket.c b/mutt_socket.c
+index dc845865..be86e684 100644
+--- a/mutt_socket.c
++++ b/mutt_socket.c
+@@ -408,11 +408,17 @@ int raw_socket_read (CONNECTION* conn, char* buf, size_t len)
+ {
+   int rc;
+ 
+-  if ((rc = read (conn->fd, buf, len)) == -1)
++  do
++  {
++    rc = read (conn->fd, buf, len);
++  } while (rc < 0 && errno == EINTR);
++
++  if (rc < 0)
+   {
+     mutt_error (_("Error talking to %s (%s)"), conn->account.host,
+ 		strerror (errno));
+     mutt_sleep (2);
++    return -1;
+   }
+ 
+   return rc;
+@@ -421,15 +427,27 @@ int raw_socket_read (CONNECTION* conn, char* buf, size_t len)
+ int raw_socket_write (CONNECTION* conn, const char* buf, size_t count)
+ {
+   int rc;
++  size_t sent = 0;
+ 
+-  if ((rc = write (conn->fd, buf, count)) == -1)
++  do
+   {
+-    mutt_error (_("Error talking to %s (%s)"), conn->account.host,
+-		strerror (errno));
+-    mutt_sleep (2);
+-  }
++    do
++    {
++      rc = write (conn->fd, buf + sent, count - sent);
++    } while (rc < 0 && errno == EINTR);
+ 
+-  return rc;
++    if (rc < 0)
++    {
++      mutt_error (_("Error talking to %s (%s)"), conn->account.host,
++                  strerror (errno));
++      mutt_sleep (2);
++      return -1;
++    }
++
++    sent += rc;
++  } while (sent < count);
++
++  return sent;
+ }
+ 
+ int raw_socket_poll (CONNECTION* conn, time_t wait_secs)
+-- 
+2.20.1
+

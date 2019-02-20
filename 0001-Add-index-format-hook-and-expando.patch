@@ -1,0 +1,429 @@
+From 7ebb6205369a70643d79670a7305748f773faff6 Mon Sep 17 00:00:00 2001
+From: Kevin McCarthy <kevin@8t8.us>
+Date: Mon, 29 Oct 2018 13:45:02 -0700
+Subject: [PATCH] Add index-format-hook and expando.
+
+index-format-hook is used to allow dynamic insertion/evaluation of
+format strings into $index_format.
+
+It can be used, for example, to implement date formatting based on the
+age of the message.
+
+Add a new %@name@ expando to $index_format, which evaluates the
+matching index-format-hooks with "name".
+---
+ doc/manual.xml.head |  88 +++++++++++++++++++++++++-
+ hdrline.c           |  23 +++++++
+ hook.c              | 147 +++++++++++++++++++++++++++++++++++++++++++-
+ init.c              |   3 +-
+ init.h              |   3 +
+ mutt.h              |   3 +-
+ protos.h            |   2 +
+ 7 files changed, 265 insertions(+), 4 deletions(-)
+
+diff --git a/doc/manual.xml.head b/doc/manual.xml.head
+index a068fb55..8a328c85 100644
+--- a/doc/manual.xml.head
++++ b/doc/manual.xml.head
+@@ -3820,6 +3820,70 @@ e-mail address, or even just a real name.
+ 
+ </sect1>
+ 
++<sect1 id="index-format-hook">
++<title>Dynamically Changing $index_format using Patterns</title>
++
++<para>Usage:</para>
++
++<cmdsynopsis>
++<command>index-format-hook</command>
++<arg choice="plain">
++<replaceable class="parameter">name</replaceable>
++</arg>
++<arg choice="plain">
++<replaceable class="parameter">[!]pattern</replaceable>
++</arg>
++<arg choice="plain">
++<replaceable class="parameter">format-string</replaceable>
++</arg>
++</cmdsynopsis>
++
++<para>
++This command is used to inject format strings dynamically into <link
++linkend="index-format">$index_format</link> based on pattern matching
++against the current message.
++</para>
++
++<para>
++The <link linkend="index-format">$index_format</link> expando
++<emphasis>%@name@</emphasis> specifies a placeholder for the
++injection.  Index-format-hooks with the same <emphasis>name</emphasis>
++are matched using <link
++linkend="patterns"><emphasis>pattern</emphasis></link> against the
++current message.  Matching is done in the order specified in the
++.muttrc, with the first match being used.  The hook's
++<emphasis>format-string</emphasis> is then substituted and evaluated.
++</para>
++
++<para>
++Because the first match is used, best practice is to put a catch-all
++<emphasis>~A</emphasis> pattern as the last hook.  Here is an example
++showing how to implement dynamic date formatting:
++</para>
++
++<screen>
++set index_format="%4C %-6@date@ %-15.15F %Z (%4c) %s"
++
++index-format-hook  date  "~d&lt;1d"    "%[%H:%M]"
++index-format-hook  date  "~d&lt;1m"    "%[%a %d]"
++index-format-hook  date  "~d&lt;1y"    "%[%b %d]"
++index-format-hook  date  "~A"       "%[%m/%y]"
++</screen>
++
++<para>
++Another example, showing a way to prepend to the subject.  Note that
++without a catch-all ~A pattern, no match results in the expando
++being replaced with an empty string.
++</para>
++
++<screen>
++set index_format="%4C %@subj_flags@%s"
++
++index-format-hook  subj_flags  "~f boss@example.com"    "** BOSS ** "
++index-format-hook  subj_flags  "~f spouse@example.com"  ":-) "
++</screen>
++</sect1>
++
+ <sect1 id="push">
+ <title>Adding Key Sequences to the Keyboard Buffer</title>
+ 
+@@ -5751,6 +5815,12 @@ option/command.  See:
+ </para>
+ </listitem>
+ 
++<listitem>
++<para>
++<link linkend="index-format-hook"><command>index-format-hook</command></link>
++</para>
++</listitem>
++
+ <listitem>
+ <para>
+ <link linkend="mbox-hook"><command>mbox-hook</command></link>
+@@ -5824,7 +5894,8 @@ From: header is changed to <literal>&lt;c@c.c&gt;</literal>.
+ Hooks that act upon messages (<command>message-hook</command>,
+ <command>reply-hook</command>, <command>send-hook</command>,
+ <command>send2-hook</command>, <command>save-hook</command>,
+-<command>fcc-hook</command>) are evaluated in a slightly different
++<command>fcc-hook</command>, <command>index-format-hook</command>)
++are evaluated in a slightly different
+ manner. For the other types of hooks, a <link linkend="regexp">regular
+ expression</link> is sufficient.  But in dealing with messages a finer
+ grain of control is needed for matching since for different purposes you
+@@ -9893,6 +9964,21 @@ The following are the commands understood by Mutt:
+ </cmdsynopsis>
+ </listitem>
+ 
++<listitem>
++<cmdsynopsis>
++<command><link linkend="index-format-hook">index-format-hook</link></command>
++<arg choice="plain">
++<replaceable class="parameter">name</replaceable>
++</arg>
++<arg choice="plain">
++<replaceable class="parameter">[!]pattern</replaceable>
++</arg>
++<arg choice="plain">
++<replaceable class="parameter">format-string</replaceable>
++</arg>
++</cmdsynopsis>
++</listitem>
++
+ <listitem>
+ <cmdsynopsis>
+ <command><link linkend="lists">lists</link></command>
+diff --git a/hdrline.c b/hdrline.c
+index ea76e836..5e79d32d 100644
+--- a/hdrline.c
++++ b/hdrline.c
+@@ -753,6 +753,29 @@ hdr_format_str (char *dest,
+ 
+       break;
+ 
++    case '@':
++    {
++      const char *end = src;
++      static unsigned char recurse = 0;
++
++      while (*end && *end != '@')
++        end++;
++      if ((*end == '@') && (recurse < 20))
++      {
++        recurse++;
++        mutt_substrcpy (buf2, src, end, sizeof(buf2));
++        mutt_FormatString (buf2, sizeof(buf2), col, cols,
++                           NONULL (mutt_idxfmt_hook (buf2, ctx, hdr)),
++                           hdr_format_str, (unsigned long) hfi, flags);
++        mutt_format_s (dest, destlen, prefix, buf2);
++        recurse--;
++
++        src = end + 1;
++        break;
++      }
++      /* otherwise fall through */
++    }
++
+     default:
+       snprintf (dest, destlen, "%%%s%c", prefix, op);
+       break;
+diff --git a/hook.c b/hook.c
+index 540d7867..4d0c0b24 100644
+--- a/hook.c
++++ b/hook.c
+@@ -44,6 +44,7 @@ typedef struct hook
+ } HOOK;
+ 
+ static HOOK *Hooks = NULL;
++static HASH *IdxFmtHooks = NULL;
+ 
+ static int current_hook_type = 0;
+ 
+@@ -266,6 +267,119 @@ static void delete_hooks (int type)
+   }
+ }
+ 
++static void delete_idxfmt_hooklist (void *list)
++{
++  HOOK *h, *next;
++
++  h = (HOOK *)list;
++  while (h)
++  {
++    next = h->next;
++    delete_hook (h);
++    h = next;
++  }
++}
++
++static void delete_idxfmt_hooks (void)
++{
++  hash_destroy (&IdxFmtHooks, delete_idxfmt_hooklist);
++}
++
++int mutt_parse_idxfmt_hook (BUFFER *buf, BUFFER *s, unsigned long data, BUFFER *err)
++{
++  HOOK *hooks, *ptr;
++  BUFFER *name, *pattern, *fmtstring;
++  int rc = -1, not = 0;
++  pattern_t *pat = NULL;
++
++  name = mutt_buffer_pool_get ();
++  pattern = mutt_buffer_pool_get ();
++  fmtstring = mutt_buffer_pool_get ();
++
++  if (!IdxFmtHooks)
++    IdxFmtHooks = hash_create (30, MUTT_HASH_STRDUP_KEYS);
++
++  if (!MoreArgs (s))
++  {
++    strfcpy (err->data, _("not enough arguments"), err->dsize);
++    goto out;
++  }
++  mutt_extract_token (name, s, 0);
++  hooks = hash_find (IdxFmtHooks, mutt_b2s (name));
++
++  if (*s->dptr == '!')
++  {
++    s->dptr++;
++    SKIPWS (s->dptr);
++    not = 1;
++  }
++  mutt_extract_token (pattern, s, 0);
++
++  if (!MoreArgs (s))
++  {
++    strfcpy (err->data, _("too few arguments"), err->dsize);
++    goto out;
++  }
++  mutt_extract_token (fmtstring, s, 0);
++
++  if (MoreArgs (s))
++  {
++    strfcpy (err->data, _("too many arguments"), err->dsize);
++    goto out;
++  }
++
++  if (DefaultHook && *DefaultHook)
++  {
++    mutt_buffer_increase_size (pattern, HUGE_STRING);
++    mutt_check_simple (pattern->data, pattern->dsize, DefaultHook);
++    mutt_buffer_fix_dptr (pattern);  /* not necessary, but to be safe */
++  }
++
++  /* check to make sure that a matching hook doesn't already exist */
++  for (ptr = hooks; ptr; ptr = ptr->next)
++  {
++    if ((ptr->rx.not == not) &&
++        !mutt_strcmp (mutt_b2s (pattern), ptr->rx.pattern))
++    {
++      FREE (&ptr->command);
++      ptr->command = safe_strdup (mutt_b2s (fmtstring));
++      rc = 0;
++      goto out;
++    }
++    if (!ptr->next)
++      break;
++  }
++
++  if ((pat = mutt_pattern_comp (pattern->data, MUTT_FULL_MSG, err)) == NULL)
++      goto out;
++
++  if (ptr)
++  {
++    ptr->next = safe_calloc (1, sizeof (HOOK));
++    ptr = ptr->next;
++  }
++  else
++    ptr = safe_calloc (1, sizeof (HOOK));
++  ptr->type = data;
++  ptr->command = safe_strdup (mutt_b2s (fmtstring));
++  ptr->pattern = pat;
++  ptr->rx.pattern = safe_strdup (mutt_b2s (pattern));
++  ptr->rx.rx = NULL;
++  ptr->rx.not = not;
++
++  if (!hooks)
++    hash_insert (IdxFmtHooks, mutt_b2s (name), ptr);
++
++  rc = 0;
++
++out:
++  mutt_buffer_pool_release (&name);
++  mutt_buffer_pool_release (&pattern);
++  mutt_buffer_pool_release (&fmtstring);
++
++  return rc;
++}
++
+ int mutt_parse_unhook (BUFFER *buf, BUFFER *s, unsigned long data, BUFFER *err)
+ {
+   while (MoreArgs (s))
+@@ -280,6 +394,7 @@ int mutt_parse_unhook (BUFFER *buf, BUFFER *s, unsigned long data, BUFFER *err)
+ 	return -1;
+       }
+       delete_hooks (0);
++      delete_idxfmt_hooks ();
+     }
+     else
+     {
+@@ -298,7 +413,10 @@ int mutt_parse_unhook (BUFFER *buf, BUFFER *s, unsigned long data, BUFFER *err)
+ 		  buf->data, buf->data);
+ 	return -1;
+       }
+-      delete_hooks (type);
++      if (type == MUTT_IDXFMTHOOK)
++        delete_idxfmt_hooks ();
++      else
++        delete_hooks (type);
+     }
+   }
+   return 0;
+@@ -563,3 +681,30 @@ void mutt_account_hook (const char* url)
+   FREE (&err.data);
+ }
+ #endif
++
++const char *mutt_idxfmt_hook (const char *name, CONTEXT *ctx, HEADER *hdr)
++{
++  HOOK *hooklist, *hook;
++  pattern_cache_t cache;
++  const char *fmtstring = NULL;
++
++  if (!IdxFmtHooks)
++    return NULL;
++
++  current_hook_type = MUTT_IDXFMTHOOK;
++  hooklist = hash_find (IdxFmtHooks, name);
++  memset (&cache, 0, sizeof (cache));
++
++  for (hook = hooklist; hook; hook = hook->next)
++  {
++    if ((mutt_pattern_exec (hook->pattern, 0, ctx, hdr, &cache) > 0) ^ hook->rx.not)
++    {
++      fmtstring = hook->command;
++      break;
++    }
++  }
++
++  current_hook_type = 0;
++
++  return fmtstring;
++}
+diff --git a/init.c b/init.c
+index a73e31f6..2acd885e 100644
+--- a/init.c
++++ b/init.c
+@@ -3671,7 +3671,8 @@ int mutt_get_hook_type (const char *name)
+   const struct command_t *c;
+ 
+   for (c = Commands ; c->name ; c++)
+-    if (c->func == mutt_parse_hook && ascii_strcasecmp (c->name, name) == 0)
++    if ((c->func == mutt_parse_hook || c->func == mutt_parse_idxfmt_hook) &&
++        ascii_strcasecmp (c->name, name) == 0)
+       return c->data;
+   return 0;
+ }
+diff --git a/init.h b/init.h
+index 251395a1..021214df 100644
+--- a/init.h
++++ b/init.h
+@@ -1512,6 +1512,8 @@ struct option_t MuttVars[] = {
+   **            the second is deleted or encryption flags (``D''/``d''/``S''/``P''/``s''/``K'').
+   **            the third is either tagged/flagged (``\(as''/``!''), or one of the characters
+   **            listed in $$to_chars.
++  ** .dt %@name@ .dd insert and evaluate format-string from the matching
++  **                 ``$index-format-hook'' command
+   ** .dt %{fmt} .dd the date and time of the message is converted to sender's
+   **                time zone, and ``fmt'' is expanded by the library function
+   **                \fCstrftime(3)\fP; a leading bang disables locales
+@@ -4238,6 +4240,7 @@ const struct command_t Commands[] = {
+   { "iconv-hook",	mutt_parse_hook,	MUTT_ICONVHOOK },
+ #endif
+   { "ignore",		parse_ignore,		0 },
++  { "index-format-hook",mutt_parse_idxfmt_hook, MUTT_IDXFMTHOOK },
+   { "lists",		parse_lists,		0 },
+   { "macro",		mutt_parse_macro,	0 },
+   { "mailboxes",	mutt_parse_mailboxes,	MUTT_MAILBOXES },
+diff --git a/mutt.h b/mutt.h
+index 90fe5648..f4fd74f1 100644
+--- a/mutt.h
++++ b/mutt.h
+@@ -173,7 +173,8 @@ typedef enum
+ #define MUTT_OPENHOOK    (1<<12)
+ #define MUTT_APPENDHOOK  (1<<13)
+ #define MUTT_CLOSEHOOK   (1<<14)
+-#endif
++#endif /* USE_COMPRESSED */
++#define MUTT_IDXFMTHOOK  (1<<15)
+ 
+ /* tree characters for linearize_tree and print_enriched_string */
+ #define MUTT_TREE_LLCORNER      1
+diff --git a/protos.h b/protos.h
+index 6269d87f..c4e5a2f9 100644
+--- a/protos.h
++++ b/protos.h
+@@ -221,6 +221,7 @@ void mutt_free_parameter (PARAMETER **);
+ void mutt_free_regexp (REGEXP **);
+ void mutt_generate_header (char *, size_t, HEADER *, int);
+ void mutt_help (int);
++const char *mutt_idxfmt_hook (const char *, CONTEXT *, HEADER *);
+ void mutt_draw_tree (CONTEXT *);
+ void mutt_check_lookup_list (BODY *, char *, int);
+ void mutt_make_attribution (CONTEXT *ctx, HEADER *cur, FILE *out);
+@@ -348,6 +349,7 @@ int mutt_parse_exec (BUFFER *, BUFFER *, unsigned long, BUFFER *);
+ int mutt_parse_color (BUFFER *, BUFFER *, unsigned long, BUFFER *);
+ int mutt_parse_uncolor (BUFFER *, BUFFER *, unsigned long, BUFFER *);
+ int mutt_parse_hook (BUFFER *, BUFFER *, unsigned long, BUFFER *);
++int mutt_parse_idxfmt_hook (BUFFER *, BUFFER *, unsigned long, BUFFER *);
+ int mutt_parse_macro (BUFFER *, BUFFER *, unsigned long, BUFFER *);
+ int mutt_parse_mailboxes (BUFFER *, BUFFER *, unsigned long, BUFFER *);
+ int mutt_parse_mono (BUFFER *, BUFFER *, unsigned long, BUFFER *);
