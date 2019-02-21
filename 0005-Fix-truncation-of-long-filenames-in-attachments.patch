@@ -1,0 +1,36 @@
+From f476d0aecd6f88db5291427fced21a8e834ca181 Mon Sep 17 00:00:00 2001
+From: Andrey Skvortsov <andrej.skvortzov@gmail.com>
+Date: Thu, 21 Feb 2019 16:37:05 +0300
+Subject: [PATCH] Fix truncation of long filenames in attachments.
+
+Currently mutt truncates long filenames in attachments and doesn't
+take into account UTF-8 character size. If filename is truncated in
+the middle of multi-byte UTF-8 character (last character is bad),
+then some mail clients assume whole attachment name bad and don't
+display its name (use 'Noname' instead).
+
+Filenames can be up to 255 *characters* long depending on used
+filesystem. ReiserFS, NFTS, FAT, APFS and some other supports up to
+255 characters.
+In the worst case 255 characters in UTF-8 will take 255*4 = 1020
+bytes. Every non-ascii byte in the filename will be encoded using 3
+bytes (for example, %8D).
+So 'Content-Disposition' will take in the worst case up to: 1020*3 =
+3060 bytes. Therefore even LONG_STRING (1024) isn't enough.
+---
+ sendlib.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/sendlib.c b/sendlib.c
+index 8291aa8e..8a772823 100644
+--- a/sendlib.c
++++ b/sendlib.c
+@@ -293,7 +293,7 @@ static void encode_8bit (FGETCONV *fc, FILE *fout, int istext)
+ int mutt_write_mime_header (BODY *a, FILE *f)
+ {
+   PARAMETER *p;
+-  char buffer[STRING];
++  char buffer[HUGE_STRING];
+   char *t;
+   char *fn;
+   int len;
